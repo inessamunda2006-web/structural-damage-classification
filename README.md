@@ -110,15 +110,20 @@ Per kelas pada holdout (model final, tanpa bobot kelas): Grade 5 dan Grade 1 pal
 
 ## Interpretasi
 
-- **Fitur tetangga adalah sinyal terkuat** (sekitar 63% total gain). `building_id` berurutan mengikuti urutan survei, dan bangunan dengan ID bersebelahan punya grade yang sama 52% dari waktu, dibanding sekitar 25% kalau acak. ID bangunan test terselip di antara ID train (median jarak ke ID train terdekat sama dengan langkah ID, yaitu 10), jadi label train di sekitarnya informatif. Fitur ini menaikkan akurasi holdout sekitar 3.8 poin.
-- **Lokasi** (target encoding ward dan vdcmun) menjadi sinyal berikutnya (sekitar 10% gain untuk ward). Proporsi Grade 5 per district berkisar 9% sampai 81%, kemungkinan terkait kedekatan dengan pusat gempa dan kondisi tanah, tetapi penyebab pastinya tidak ada di data.
-- **Struktur bangunan** (usia, jenis atap, lantai dasar, luas dan tinggi) memberi sinyal tambahan yang lebih kecil.
-- **Kesalahan umumnya antar kelas bertetangga** (misal Grade 3 tertukar dengan Grade 4), terlihat dari QWK 0.76 yang jauh lebih tinggi dari akurasi.
-- **Batasan**: fitur tetangga dan target encoding hanya berlaku karena test adalah sampel acak dari survei yang sama dengan train (semua ward test ada di train dan ID-nya terselip di antara ID train). Untuk bangunan dari wilayah atau survei yang tidak ada di data latih, performanya akan turun ke level model tanpa fitur tersebut (sekitar 0.58).
-- **Public vs Private score**: keduanya berasal dari test yang sama, jadi pemilihan model berdasarkan holdout/CV (bukan berdasarkan public score) lebih aman agar tidak overfit ke public leaderboard.
+Dari hasil di atas, ini yang bisa disimpulkan:
 
-## Catatan Aturan
+- **Fitur tetangga paling berpengaruh** (sekitar 63% dari total gain model). Setelah dicek, `building_id` ternyata berurutan sesuai urutan survei, dan bangunan yang ID-nya bersebelahan punya grade yang sama sekitar 52% dari waktu, sedangkan kalau acak cuma sekitar 25%. ID bangunan di test juga terselip di antara ID train (jarak median ke ID train terdekat 10), jadi label train di sekitarnya bisa jadi petunjuk. Dengan fitur ini akurasi holdout naik sekitar 3.8 poin.
+- **Lokasi jadi petunjuk kedua** (target encoding ward dan vdcmun, ward sekitar 10% gain). Persentase Grade 5 antar district beda jauh, dari 9% sampai 81%. Mungkin karena jarak ke pusat gempa atau kondisi tanahnya, tapi data ini tidak punya informasi itu, jadi penyebabnya tidak bisa dipastikan.
+- **Struktur bangunan** (usia, jenis atap, lantai dasar, luas, dan tinggi) ikut membantu, tapi pengaruhnya lebih kecil.
+- **Salah prediksi kebanyakan ke kelas yang bersebelahan**, misalnya Grade 3 tertukar dengan Grade 4. Ini kelihatan dari QWK (0.76) yang jauh lebih tinggi daripada akurasi (0.62), artinya kalau salah biasanya meleset cuma satu tingkat.
+- **Keterbatasan**: fitur tetangga dan target encoding cuma bisa dipakai karena test diambil acak dari survei yang sama dengan train (semua ward test ada di train, dan ID-nya terselip di antara ID train). Kalau dipakai untuk wilayah atau survei yang tidak ada di data latih, performanya akan turun ke level model tanpa fitur tersebut, sekitar 0.58.
+- **Soal public dan private score**: keduanya dihitung dari data test yang sama, jadi model dipilih berdasarkan hasil holdout/CV, bukan public score, supaya tidak overfit ke public leaderboard.
 
-- Dataset tidak di-commit (`data/*.csv` ada di `.gitignore`), cara unduh ada di atas.
-- Semua function dan class di `scripts/` memiliki docstring.
-- Tidak menggunakan model Neural Network.
+## Catatan
+
+- Dataset tidak ikut di-commit karena ukurannya besar (`data/*.csv` sudah masuk `.gitignore`). Cara download-nya ada di bagian "Cara Menggunakan Repository".
+- Semua function dan class di folder `scripts/` sudah ada docstring-nya.
+- Model yang dipakai LightGBM (boosting dari pohon keputusan), jadi tidak pakai Neural Network sesuai aturan tugas.
+- Tuning hyperparameter dilakukan sebelum fitur tetangga ditambahkan dan belum diulang, jadi masih mungkin bisa lebih bagus kalau dituning ulang.
+- Bobot kelas (`postprocess.py`) cuma opsional karena efeknya kecil, jadi submission utama pakai prediksi biasa.
+- Kalau mau menjalankan ulang, urutannya: download data, `python -m scripts.train`, lalu `python -m scripts.predict`.
