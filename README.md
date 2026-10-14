@@ -28,6 +28,8 @@ structural-damage-classification/
 │   ├── config.py
 │   ├── preprocess.py
 │   ├── feature_engineering.py
+│   ├── neighbor_features.py
+│   ├── postprocess.py
 │   ├── models.py
 │   ├── tune.py
 │   ├── train.py
@@ -36,7 +38,8 @@ structural-damage-classification/
 ├── models/
 │   ├── pipeline_model_lgbm.pkl
 │   ├── best_params.json
-│   └── cv_scores.csv
+│   ├── class_weights.json
+│   └── cv_scores.csv          (CV model awal, tanpa fitur tetangga)
 │
 ├── submissions/
 │   └── submission.csv
@@ -51,7 +54,7 @@ structural-damage-classification/
 
 1. Clone repo dan install dependency:
    ```bash
-   git clone https://github.com/inessamunda2006-web/structural-damage-classification.git
+   git clone <url-repo-kamu>
    cd structural-damage-classification
    pip install -r requirements.txt
    ```
@@ -64,13 +67,14 @@ structural-damage-classification/
    ```bash
    python -m scripts.tune
    ```
-4. Training, evaluasi, dan simpan model (tambahkan `--cv` untuk Stratified 5-fold CV):
+4. Training, evaluasi holdout, dan simpan model (tambahkan `--cv` untuk Stratified 5-fold CV, lebih lambat):
    ```bash
-   python -m scripts.train --cv
+   python -m scripts.train
    ```
-5. Buat file submission:
+5. Buat file submission (label angka 1-5, sesuai yang diterima evaluator Kaggle):
    ```bash
-   python -m scripts.predict
+   python -m scripts.predict              # argmax biasa (default)
+   python -m scripts.predict --weighted   # opsional: bobot kelas untuk macro-F1
    ```
    Output: `submissions/submission.csv`. Upload ke Kaggle atau lewat CLI:
    ```bash
@@ -82,32 +86,36 @@ Notebook di `notebooks/` dijalankan dari foldernya sendiri dan memakai modul dar
 ## Workflow Analisis
 
 1. **EDA** (`01_eda.ipynb`): distribusi target, missing value, anomali, pengaruh lokasi dan material.
-2. **Feature engineering** (`BuildingFeatureAdder`): `age_building = 999` dianggap placeholder (jadi NaN + flag), rasio tinggi per lantai, luas per lantai, proxy volume, slenderness, log luas.
-3. **Preprocessing** (`ColumnTransformer`): numerik di-impute median, kategorik `OrdinalEncoder`, kolom lokasi (district, vdcmun, ward) dipakai sebagai angka asli dan juga `TargetEncoder` multikelas (cross-fitting internal supaya tidak bocor).
-4. **Model**: `Pipeline` = feature engineering, ColumnTransformer, `LGBMClassifier`. Tidak memakai Neural Network. Perbandingan awal dengan Logistic Regression (OvR dan OvO), Random Forest, HistGradientBoosting ada di `02_modeling.ipynb`.
-5. **Tuning**: `RandomizedSearchCV` (10 kombinasi, 3-fold, 25% data), lalu jumlah pohon final dipilih dari kurva validasi holdout.
-6. **Evaluasi**: holdout 80/20 dan Stratified 5-fold CV pada seluruh train.
-7. **Prediksi**: model dilatih ulang di seluruh train, lalu `predict.py` menulis `submission.csv` sesuai format `sample_submission.csv`.
+2. **Fitur tetangga** (`NeighborTargetFeatures`): `building_id` berurutan mengikuti urutan survei, jadi label bangunan train dengan ID berdekatan (jendela 3, 10, 30) dipakai sebagai fitur, mirip KNN. Pada data train dihitung leave-one-out supaya label baris itu sendiri tidak bocor ke fiturnya.
+3. **Feature engineering** (`BuildingFeatureAdder`): `age_building = 999` dianggap placeholder (jadi NaN + flag), rasio tinggi per lantai, luas per lantai, proxy volume, slenderness, log luas.
+4. **Preprocessing** (`ColumnTransformer`): numerik di-impute median, kategorik `OrdinalEncoder`, kolom lokasi (district, vdcmun, ward) dipakai sebagai angka asli dan juga `TargetEncoder` multikelas (cross-fitting internal supaya tidak bocor).
+5. **Model**: `Pipeline` = NeighborTargetFeatures, BuildingFeatureAdder, ColumnTransformer, `LGBMClassifier`. Tidak memakai Neural Network. Perbandingan awal dengan Logistic Regression (OvR dan OvO), Random Forest, HistGradientBoosting ada di `02_modeling.ipynb`.
+6. **Tuning**: `RandomizedSearchCV` (10 kombinasi, 3-fold, 25% data), lalu jumlah pohon final dipilih dari kurva validasi holdout. Tuning dilakukan sebelum fitur tetangga ditambahkan dan tidak diulang, jadi hyperparameter model final mungkin belum optimal.
+7. **Evaluasi**: holdout 80/20 (stratified) untuk model final, dan Stratified 5-fold CV untuk model awal.
+8. **Prediksi**: model dilatih ulang di seluruh train, lalu `predict.py` menulis `submission.csv` (kolom sama dengan `sample_submission.csv`, label angka 1-5).
+9. **Post-processing opsional** (`postprocess.py`): bobot per kelas yang dicari pada data holdout untuk macro-F1. Efeknya kecil (macro-F1 +0.3 poin, akurasi -0.4 poin), jadi tidak dipakai secara default.
 
 ## Hasil
 
-Stratified 5-fold CV pada seluruh data train (rata-rata, simpangan baku):
+Holdout 80/20 (stratified, split yang sama untuk kedua model):
 
-| Metrik | Rata-rata | Std |
-|---|---|---|
-| Accuracy (= micro-F1) | 0.5877 | 0.0013 |
-| Macro-F1 | 0.5472 | 0.0012 |
-| Quadratic Weighted Kappa | 0.7320 | 0.0022 |
+| Model | Accuracy | Macro-F1 | QWK |
+|---|---|---|---|
+| Awal (tanpa fitur tetangga) | 0.5845 | 0.5434 | 0.7314 |
+| **Final (dengan fitur tetangga)** | **0.6224** | **0.5869** | **0.7613** |
 
-Per kelas pada holdout: Grade 5 dan Grade 1 paling mudah diprediksi (F1 sekitar 0.74 dan 0.67), sedangkan Grade 2 dan Grade 3 paling sulit (F1 sekitar 0.38 dan 0.42).
+Model awal juga dievaluasi dengan Stratified 5-fold CV: accuracy 0.5877 (std 0.0013), macro-F1 0.5472, QWK 0.7320 (`models/cv_scores.csv`). Public score submission pertama (model awal) di Kaggle: 0.55031.
+
+Per kelas pada holdout (model final, tanpa bobot kelas): Grade 5 dan Grade 1 paling mudah diprediksi, sedangkan Grade 2 dan Grade 3 paling sulit.
 
 ## Interpretasi
 
-- **Lokasi adalah sinyal terkuat.** Fitur target encoding ward menyumbang sekitar 57% total gain model, ditambah vdcmun. Tingkat kerusakan sangat berbeda antar wilayah (proporsi Grade 5 per district berkisar 9% sampai 81%), kemungkinan terkait kedekatan dengan pusat gempa dan kondisi tanah, tetapi penyebab pastinya tidak ada di data. Ini bekerja karena semua ward di test juga ada di train. Kalau dipakai untuk wilayah baru yang tidak ada di data latih, performanya akan turun.
-- **Struktur bangunan** (usia, jenis atap, lantai dasar, luas dan tinggi) menjadi sinyal kedua. Fitur turunan seperti `slenderness` dan `volume_proxy` masuk 12 besar importance.
-- **Kesalahan umumnya antar kelas bertetangga** (misal Grade 3 tertukar dengan Grade 4), terlihat dari QWK 0.73 yang jauh lebih tinggi dari akurasi. Kelas ordinal ini memang bersebelahan dan fitur yang ada belum cukup membedakannya.
-- **Batasan**: akurasi sekitar 0.59 menunjukkan sebagian besar variasi kerusakan tidak terjelaskan oleh fitur yang tersedia (tidak ada data gempa seperti jarak ke episentrum atau jenis tanah). Menambah kompleksitas model memberi peningkatan yang sangat kecil (tuning hanya menaikkan akurasi sekitar 0.5 poin).
-- **Public vs Private score**: keduanya berasal dari test yang sama, jadi pemilihan model berdasarkan CV (bukan berdasarkan public score) lebih aman agar tidak overfit ke public leaderboard.
+- **Fitur tetangga adalah sinyal terkuat** (sekitar 63% total gain). `building_id` berurutan mengikuti urutan survei, dan bangunan dengan ID bersebelahan punya grade yang sama 52% dari waktu, dibanding sekitar 25% kalau acak. ID bangunan test terselip di antara ID train (median jarak ke ID train terdekat sama dengan langkah ID, yaitu 10), jadi label train di sekitarnya informatif. Fitur ini menaikkan akurasi holdout sekitar 3.8 poin.
+- **Lokasi** (target encoding ward dan vdcmun) menjadi sinyal berikutnya (sekitar 10% gain untuk ward). Proporsi Grade 5 per district berkisar 9% sampai 81%, kemungkinan terkait kedekatan dengan pusat gempa dan kondisi tanah, tetapi penyebab pastinya tidak ada di data.
+- **Struktur bangunan** (usia, jenis atap, lantai dasar, luas dan tinggi) memberi sinyal tambahan yang lebih kecil.
+- **Kesalahan umumnya antar kelas bertetangga** (misal Grade 3 tertukar dengan Grade 4), terlihat dari QWK 0.76 yang jauh lebih tinggi dari akurasi.
+- **Batasan**: fitur tetangga dan target encoding hanya berlaku karena test adalah sampel acak dari survei yang sama dengan train (semua ward test ada di train dan ID-nya terselip di antara ID train). Untuk bangunan dari wilayah atau survei yang tidak ada di data latih, performanya akan turun ke level model tanpa fitur tersebut (sekitar 0.58).
+- **Public vs Private score**: keduanya berasal dari test yang sama, jadi pemilihan model berdasarkan holdout/CV (bukan berdasarkan public score) lebih aman agar tidak overfit ke public leaderboard.
 
 ## Catatan Aturan
 

@@ -5,6 +5,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OrdinalEncoder, TargetEncoder
 
+from scripts.neighbor_features import NBR_COLS
 from scripts.config import CAT_COLS, CLASSES, DATA_DIR, GEO_COLS, NUM_COLS, SEED, TARGET
 
 DERIVED_NUM = ["age_is_999", "height_per_floor", "volume_proxy", "area_per_floor",
@@ -30,15 +31,16 @@ def decode_target(pred):
     return pd.Series(pred).map(dict(enumerate(CLASSES))).values
 
 
-def build_preprocessor(use_serial=True):
+def build_preprocessor(use_serial=True, use_neighbors=True):
     """Membuat ColumnTransformer.
 
-    - Numerik (asli + turunan): impute median.
+    - Numerik (asli + turunan + fitur tetangga bila `use_neighbors`): impute median.
     - Kategorik: OrdinalEncoder (unknown -> -1), cocok untuk model berbasis pohon.
     - Geografi (district/vdcmun/ward): angka asli + TargetEncoder multikelas
       (dengan cross-fitting internal sehingga tidak bocor ke data training).
     """
-    num = NUM_COLS + DERIVED_NUM + (["serial_no"] if use_serial else [])
+    num = (NUM_COLS + DERIVED_NUM + (NBR_COLS if use_neighbors else [])
+           + (["serial_no"] if use_serial else []))
     return ColumnTransformer(
         transformers=[
             ("num", SimpleImputer(strategy="median", add_indicator=False), num),

@@ -20,6 +20,7 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 
 from scripts.config import CLASSES, FIG_DIR, MODEL_DIR, SEED, TARGET
 from scripts.models import build_pipeline
+from scripts.postprocess import apply_class_weights, fit_class_weights, save_weights
 from scripts.preprocess import encode_target, load_data
 
 
@@ -76,9 +77,21 @@ def main(run_cv=False):
 
     # 1) Holdout 80/20 (stratified)
     Xa, Xb, ya, yb = train_test_split(X, y, test_size=0.2, stratify=y, random_state=SEED)
+    yb = yb.to_numpy()
     pipe = build_pipeline(**params).fit(Xa, ya)
-    pred = pipe.predict(Xb)
-    print("Holdout:", {k: round(v, 4) for k, v in scores(yb, pred).items()})
+    proba = pipe.predict_proba(Xb)
+    print("Holdout (argmax):", {k: round(v, 4) for k, v in scores(yb, proba.argmax(1)).items()})
+
+    # Bobot kelas untuk macro-F1: dicek jujur (fit di separuh holdout, uji di separuh lain)
+    idx = np.random.RandomState(SEED).permutation(len(yb))
+    half_a, half_b = idx[: len(idx) // 2], idx[len(idx) // 2:]
+    w_a = fit_class_weights(proba[half_a], yb[half_a])
+    print("Separuh B, argmax  :", {k: round(v, 4) for k, v in scores(yb[half_b], proba[half_b].argmax(1)).items()})
+    print("Separuh B, berbobot:", {k: round(v, 4) for k, v in scores(yb[half_b], apply_class_weights(proba[half_b], w_a)).items()})
+    weights = fit_class_weights(proba, yb)  # bobot final: fit di seluruh holdout
+    save_weights(weights)
+    print("Bobot kelas final:", weights.round(3))
+    pred = apply_class_weights(proba, weights)
     print(classification_report(yb, pred, target_names=CLASSES, digits=3))
     plot_confusion(yb, pred, FIG_DIR / "confusion_matrix.png")
     plot_importance(pipe, FIG_DIR / "feature_importance.png")
